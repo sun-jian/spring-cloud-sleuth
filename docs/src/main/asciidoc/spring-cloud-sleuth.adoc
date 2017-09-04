@@ -5,6 +5,7 @@
 :toc: left
 :toclevels: 8
 :nofooter:
+:sectlinks: true
 
 Spring Cloud Sleuth
 ====================
@@ -420,6 +421,21 @@ And you could register them like this:
 include::../../../..//spring-cloud-sleuth-core/src/test/java/org/springframework/cloud/sleuth/instrument/web/TraceCustomFilterResponseInjectorTests.java[tags=configuration,indent=0]
 ----
 
+=== TraceFilter
+
+You can also modify the behaviour of the `TraceFilter` - the component that is responsible
+for processing the input HTTP request and adding tags basing on the HTTP response. You can customize
+the tags, or modify the response headers by registering your own instance of the `TraceFilter` bean.
+
+In the following example we will register the `TraceFilter` bean and we will add the
+`ZIPKIN-TRACE-ID` response header containing the current Span's trace id. Also we will
+add to the Span a tag with key `custom` and a value `tag`.
+
+[source,java]
+----
+include::../../../..//spring-cloud-sleuth-core/src/test/java/org/springframework/cloud/sleuth/instrument/web/TraceFilterIntegrationTests.java[tags=response_headers,indent=0]
+----
+
 === Custom SA tag in Zipkin
 
 Sometimes you want to create a manual Span that will wrap a call to an external service which is not instrumented.
@@ -482,6 +498,26 @@ Stream based span reporting).
 [source,yaml]
 ----
 spring.zipkin.locator.discovery.enabled: true
+----
+
+== Sending spans to Zipkin
+
+By default if you add `spring-cloud-starter-zipkin` as a dependency to your project,
+when the span is closed, it will be sent to Zipkin over HTTP. The communication
+is asynchronous. You can configure the URL by setting the `spring.zipkin.baseUrl`
+property as follows:
+
+[source,yaml]
+----
+spring.zipkin.baseUrl: http://192.168.99.100:9411/
+----
+
+If you want to find Zipkin via service discovery it's enough to pass the
+Zipkin's service id inside the URL (example for `zipkinserver` service id)
+
+[source,yaml]
+----
+spring.zipkin.baseUrl: http://zipkinserver/
 ----
 
 == Span Data as Messages
@@ -714,6 +750,22 @@ can see an example of how to set up such a custom `AsyncRestTemplate`.
 include::../../../../spring-cloud-sleuth-core/src/test/java/org/springframework/cloud/sleuth/instrument/async/MultipleAsyncRestTemplateTests.java[tags=custom_async_rest_template,indent=0]
 ----
 
+==== Traverson
+
+If you're using the http://docs.spring.io/spring-hateoas/docs/current/reference/html/#client.traverson[Traverson] library
+it's enough for you to inject a `RestTemplate` as a bean into your Traverson object. Since `RestTemplate`
+is already intercepted, you will get full support of tracing in your client. Below you can find a pseudo code
+of how to do that:
+
+[source,java]
+----
+@Autowired RestTemplate restTemplate;
+
+Traverson traverson = new Traverson(URI.create("http://some/address"),
+    MediaType.APPLICATION_JSON, MediaType.APPLICATION_JSON_UTF8).setRestOperations(restTemplate);
+// use Traverson
+----
+
 === Feign
 
 By default Spring Cloud Sleuth provides integration with feign via the `TraceFeignClientAutoConfiguration`. You can disable it entirely
@@ -732,7 +784,8 @@ You can disable this behaviour by setting the value of `spring.sleuth.async.enab
 
 If you annotate your method with `@Async` then we'll automatically create a new Span with the following characteristics:
 
-    - the Span name will be the annotated method name
+    - if the method is annotated with `@SpanName` then the value of the annotation will be the Span's name
+    - if the method is *not* annotated with `@SpanName` the Span name will be the annotated method name
     - the Span will be tagged with that method's class name and the method name too
 
 ==== @Scheduled annotated methods
@@ -796,4 +849,4 @@ To disable Zuul support set the `spring.sleuth.zuul.enabled` property to `false`
 You can find the running examples deployed in the https://run.pivotal.io/[Pivotal Web Services]. Check them out in the following links:
 
 - http://docssleuth-zipkin-server.cfapps.io/[Zipkin for apps presented in the samples to the top]
-- http://docsbrewing-zipkin-web.cfapps.io/[Zipkin for Brewery on PWS], its https://github.com/spring-cloud-samples/brewery[Github Code]
+- http://docsbrewing-zipkin-server.cfapps.io/[Zipkin for Brewery on PWS], its https://github.com/spring-cloud-samples/brewery[Github Code]

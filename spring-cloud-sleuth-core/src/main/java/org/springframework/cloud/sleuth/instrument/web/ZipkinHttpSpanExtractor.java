@@ -35,11 +35,11 @@ public class ZipkinHttpSpanExtractor implements HttpSpanExtractor {
 	public Span joinTrace(SpanTextMap textMap) {
 		Map<String, String> carrier = TextMapUtil.asMap(textMap);
 		boolean debug = Span.SPAN_SAMPLED.equals(carrier.get(Span.SPAN_FLAGS));
-		if (debug) {
+		if (debug && onlySpanIdIsPresent(carrier)) {
 			// we're only generating Trace ID since if there's no Span ID will assume
-			// that it's equal to Trace ID
+			// that it's equal to Trace ID - we're trying to fix a malformed request
 			generateIdIfMissing(carrier, Span.TRACE_ID_NAME);
-		} else if (carrier.get(Span.TRACE_ID_NAME) == null) {
+		} else if (traceIdIsMissing(carrier)) {
 			// can't build a Span without trace id
 			return null;
 		}
@@ -53,6 +53,18 @@ public class ZipkinHttpSpanExtractor implements HttpSpanExtractor {
 			log.error("Exception occurred while trying to extract span from carrier", e);
 			return null;
 		}
+	}
+
+	private boolean onlySpanIdIsPresent(Map<String, String> carrier) {
+		return traceIdIsMissing(carrier) && spanIdIsPresent(carrier);
+	}
+
+	private boolean traceIdIsMissing(Map<String, String> carrier) {
+		return carrier.get(Span.TRACE_ID_NAME) == null;
+	}
+
+	private boolean spanIdIsPresent(Map<String, String> carrier) {
+		return carrier.get(Span.SPAN_ID_NAME) != null;
 	}
 
 	private void generateIdIfMissing(Map<String, String> carrier, String key) {
@@ -101,7 +113,7 @@ public class ZipkinHttpSpanExtractor implements HttpSpanExtractor {
 			span.exportable(false);
 		}
 		for (Map.Entry<String, String> entry : carrier.entrySet()) {
-			if (entry.getKey().startsWith(Span.SPAN_BAGGAGE_HEADER_PREFIX + HEADER_DELIMITER)) {
+			if (entry.getKey().toLowerCase().startsWith(Span.SPAN_BAGGAGE_HEADER_PREFIX + HEADER_DELIMITER)) {
 				span.baggage(unprefixedKey(entry.getKey()), entry.getValue());
 			}
 		}
@@ -109,7 +121,7 @@ public class ZipkinHttpSpanExtractor implements HttpSpanExtractor {
 	}
 
 	private String unprefixedKey(String key) {
-		return key.substring(key.indexOf(HEADER_DELIMITER) + 1);
+		return key.substring(key.indexOf(HEADER_DELIMITER) + 1).toLowerCase();
 	}
 
 }

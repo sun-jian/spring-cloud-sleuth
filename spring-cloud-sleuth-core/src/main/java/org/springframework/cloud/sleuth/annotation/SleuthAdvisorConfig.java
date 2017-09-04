@@ -20,14 +20,15 @@ import java.lang.annotation.Annotation;
 import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicBoolean;
+
 import javax.annotation.PostConstruct;
 
 import org.aopalliance.aop.Advice;
 import org.aopalliance.intercept.MethodInvocation;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+
 import org.springframework.aop.ClassFilter;
-import org.springframework.aop.IntroductionAdvisor;
 import org.springframework.aop.IntroductionInterceptor;
 import org.springframework.aop.Pointcut;
 import org.springframework.aop.support.AbstractPointcutAdvisor;
@@ -41,7 +42,6 @@ import org.springframework.cloud.sleuth.ErrorParser;
 import org.springframework.cloud.sleuth.Span;
 import org.springframework.cloud.sleuth.Tracer;
 import org.springframework.core.annotation.AnnotationUtils;
-import org.springframework.util.ObjectUtils;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.util.StringUtils;
 
@@ -52,9 +52,8 @@ import org.springframework.util.StringUtils;
  * @author Marcin Grzejszczak
  * @since 1.2.0
  */
-class SleuthAdvisorConfig  extends AbstractPointcutAdvisor implements
-		IntroductionAdvisor, BeanFactoryAware {
-	private static final Log log = LogFactory.getLog(MethodHandles.lookup().lookupClass());
+@SuppressWarnings("serial")
+class SleuthAdvisorConfig  extends AbstractPointcutAdvisor implements BeanFactoryAware {
 
 	private Advice advice;
 
@@ -77,20 +76,6 @@ class SleuthAdvisorConfig  extends AbstractPointcutAdvisor implements
 	@Override
 	public void setBeanFactory(BeanFactory beanFactory) {
 		this.beanFactory = beanFactory;
-	}
-
-	@Override
-	public ClassFilter getClassFilter() {
-		return this.pointcut.getClassFilter();
-	}
-
-	@Override
-	public Class<?>[] getInterfaces() {
-		return new Class[] {};
-	}
-
-	@Override
-	public void validateInterfaces() throws IllegalArgumentException {
 	}
 
 	@Override
@@ -117,33 +102,9 @@ class SleuthAdvisorConfig  extends AbstractPointcutAdvisor implements
 	private final class AnnotationClassOrMethodOrArgsPointcut extends
 			DynamicMethodMatcherPointcut {
 
-		private final DynamicMethodMatcherPointcut methodResolver;
-
-		AnnotationClassOrMethodOrArgsPointcut() {
-			this.methodResolver = new DynamicMethodMatcherPointcut() {
-				@Override public boolean matches(Method method, Class<?> targetClass,
-						Object... args) {
-					if (SleuthAnnotationUtils.isMethodAnnotated(method)) {
-						if (log.isDebugEnabled()) {
-							log.debug("Found a method with Sleuth annotation");
-						}
-						return true;
-					}
-					if (SleuthAnnotationUtils.hasAnnotatedParams(method, args)) {
-						if (log.isDebugEnabled()) {
-							log.debug("Found annotated arguments of the method");
-						}
-						return true;
-					}
-					return false;
-				}
-			};
-		}
-
 		@Override
 		public boolean matches(Method method, Class<?> targetClass, Object... args) {
-			return getClassFilter().matches(targetClass) ||
-					this.methodResolver.matches(method, targetClass, args);
+			return getClassFilter().matches(targetClass);
 		}
 
 		@Override public ClassFilter getClassFilter() {
@@ -153,18 +114,6 @@ class SleuthAdvisorConfig  extends AbstractPointcutAdvisor implements
 							new AnnotationClassOrMethodFilter(ContinueSpan.class).matches(clazz);
 				}
 			};
-		}
-
-		@Override
-		public boolean equals(Object other) {
-			if (this == other) {
-				return true;
-			}
-			if (!(other instanceof AnnotationClassOrMethodOrArgsPointcut)) {
-				return false;
-			}
-			AnnotationClassOrMethodOrArgsPointcut otherAdvisor = (AnnotationClassOrMethodOrArgsPointcut) other;
-			return ObjectUtils.nullSafeEquals(this.methodResolver, otherAdvisor.methodResolver);
 		}
 
 	}
@@ -190,7 +139,7 @@ class SleuthAdvisorConfig  extends AbstractPointcutAdvisor implements
 	 */
 	private static class AnnotationMethodsResolver {
 
-		private Class<? extends Annotation> annotationType;
+		private final Class<? extends Annotation> annotationType;
 
 		public AnnotationMethodsResolver(Class<? extends Annotation> annotationType) {
 			this.annotationType = annotationType;

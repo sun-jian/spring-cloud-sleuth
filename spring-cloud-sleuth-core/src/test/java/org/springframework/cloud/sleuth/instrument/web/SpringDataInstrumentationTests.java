@@ -16,17 +16,15 @@
 
 package org.springframework.cloud.sleuth.instrument.web;
 
-import static org.springframework.cloud.sleuth.assertions.SleuthAssertions.then;
-
 import java.util.Collection;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-
 import javax.annotation.PostConstruct;
 import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
 import javax.persistence.Id;
 
+import org.awaitility.Awaitility;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -51,10 +49,11 @@ import org.springframework.hateoas.Resources;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.web.client.RestTemplate;
 
-import com.jayway.awaitility.Awaitility;
+import static org.springframework.cloud.sleuth.assertions.SleuthAssertions.then;
 
 /**
  * @author Marcin Grzejszczak
@@ -62,6 +61,7 @@ import com.jayway.awaitility.Awaitility;
 @RunWith(SpringRunner.class)
 @SpringBootTest(classes = ReservationServiceApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @DirtiesContext
+@ActiveProfiles("data")
 public class SpringDataInstrumentationTests {
 
 	@Autowired
@@ -84,7 +84,7 @@ public class SpringDataInstrumentationTests {
 
 		then(names).isNotEmpty();
 		then(this.arrayListSpanAccumulator.getSpans()).isNotEmpty();
-		Awaitility.await().until(() -> {
+		Awaitility.await().untilAsserted(() -> {
 			then(new ListOfSpans(this.arrayListSpanAccumulator.getSpans()))
 					.hasASpanWithName("http:/reservations")
 					.hasASpanWithTagKeyEqualTo("mvc.controller.class");
@@ -139,7 +139,6 @@ class SampleRecords {
 
 	private final ReservationRepository reservationRepository;
 
-	@Autowired
 	public SampleRecords(ReservationRepository reservationRepository) {
 		this.reservationRepository = reservationRepository;
 	}

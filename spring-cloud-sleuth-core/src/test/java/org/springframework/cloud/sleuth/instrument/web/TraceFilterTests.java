@@ -28,10 +28,10 @@ import org.mockito.BDDMockito;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.cloud.sleuth.DefaultSpanNamer;
 import org.springframework.cloud.sleuth.ErrorParser;
 import org.springframework.cloud.sleuth.ExceptionMessageErrorParser;
-import org.springframework.cloud.sleuth.NoOpSpanReporter;
 import org.springframework.cloud.sleuth.Sampler;
 import org.springframework.cloud.sleuth.Span;
 import org.springframework.cloud.sleuth.SpanReporter;
@@ -83,6 +83,7 @@ public class TraceFilterTests {
 	private MockHttpServletResponse response;
 	private MockFilterChain filterChain;
 	private Sampler sampler = new AlwaysSampler();
+	BeanFactory beanFactory = Mockito.mock(BeanFactory.class);
 
 	@Before
 	public void init() {
@@ -131,7 +132,7 @@ public class TraceFilterTests {
 		TraceFilter filter = new TraceFilter(beanFactory());
 		filter.doFilter(this.request, this.response, this.filterChain);
 
-		verifyCurrentSpanStatusCode(HttpStatus.OK);
+		assertThat(this.span.tags()).containsEntry("http.status_code", HttpStatus.OK.toString());
 
 		then(TestSpanContextHolder.getCurrentSpan()).isNull();
 	}
@@ -260,8 +261,8 @@ public class TraceFilterTests {
 	public void ensuresThatParentSpanIsStoppedWhenReported() throws Exception {
 		this.request = builder().header(Span.SPAN_ID_NAME, PARENT_ID)
 				.header(Span.TRACE_ID_NAME, 20L).buildRequest(new MockServletContext());
-		TraceFilter filter = new TraceFilter(this.tracer, this.traceKeys, spanIsStoppedVeryfingReporter(),
-				this.spanExtractor, this.httpTraceKeysInjector);
+		TraceFilter filter = new TraceFilter(beanFactory());
+		BDDMockito.given(beanFactory.getBean(SpanReporter.class)).willReturn(spanIsStoppedVeryfingReporter());
 
 		filter.doFilter(this.request, this.response, this.filterChain);
 	}
@@ -447,6 +448,52 @@ public class TraceFilterTests {
 		then(ExceptionUtils.getLastException()).isNull();
 	}
 
+	// #668
+	@Test
+	public void shouldSetTraceKeysForAnUntracedRequest() throws Exception {
+		this.request = builder()
+				.param("foo", "bar")
+				.buildRequest(new MockServletContext());
+		this.response.setStatus(295);
+		TraceFilter filter = new TraceFilter(beanFactory());
+
+		filter.doFilter(this.request, this.response, this.filterChain);
+
+		then(new ListOfSpans(this.spanReporter.getSpans()))
+				.hasASpanWithName("http:/")
+				.hasASpanWithTagEqualTo("http.url", "http://localhost/?foo=bar")
+				.hasASpanWithTagEqualTo("http.host", "localhost")
+				.hasASpanWithTagEqualTo("http.path", "/")
+				.hasASpanWithTagEqualTo("http.method", "GET")
+				.hasASpanWithTagEqualTo("http.status_code", "295")
+				.allSpansAreExportable();
+		then(TestSpanContextHolder.getCurrentSpan()).isNull();
+		then(ExceptionUtils.getLastException()).isNull();
+	}
+
+	@Test
+	public void samplesASpanDebugFlagWithInterceptor() throws Exception {
+		this.request = builder()
+				.header(Span.SPAN_FLAGS, 1)
+				.buildRequest(new MockServletContext());
+		this.sampler = new NeverSampler();
+		TraceFilter filter = new TraceFilter(beanFactory());
+
+		filter.doFilter(this.request, this.response, (req, res) -> {
+			// Simulate the TraceHandlerInterceptor
+			req.setAttribute(TraceRequestAttributes.HANDLED_SPAN_REQUEST_ATTR, span);
+			this.filterChain.doFilter(req, res);
+		});
+
+		then(new ListOfSpans(this.spanReporter.getSpans()))
+				.doesNotHaveASpanWithName("http:/parent/")
+				.hasASpanWithName("http:/")
+				.hasSize(1)
+				.allSpansAreExportable();
+		then(TestSpanContextHolder.getCurrentSpan()).isNull();
+		then(ExceptionUtils.getLastException()).isNull();
+	}
+
 	public void verifyParentSpanHttpTags() {
 		verifyParentSpanHttpTags(HttpStatus.OK);
 	}
@@ -459,11 +506,11 @@ public class TraceFilterTests {
 		assertThat(parentSpan().tags()).contains(entry("http.host", "localhost"),
 				entry("http.url", "http://localhost/?foo=bar"), entry("http.path", "/"),
 				entry("http.method", "GET"));
-		verifyCurrentSpanStatusCode(status);
+		verifyCurrentSpanStatusCodeForAContinuedSpan(status);
 
 	}
 
-	private void verifyCurrentSpanStatusCode(HttpStatus status) {
+	private void verifyCurrentSpanStatusCodeForAContinuedSpan(HttpStatus status) {
 		// Status is only interesting in non-success case. Omitting it saves at least
 		// 20bytes per span.
 		if (status.is2xxSuccessful()) {
@@ -483,11 +530,12 @@ public class TraceFilterTests {
 	}
 
 	private BeanFactory beanFactory() {
-		BeanFactory beanFactory = Mockito.mock(BeanFactory.class);
+		BDDMockito.given(beanFactory.getBean(TraceWebAutoConfiguration.SkipPatternProvider.class))
+				.willThrow(new NoSuchBeanDefinitionException("foo"));
 		BDDMockito.given(beanFactory.getBean(Tracer.class)).willReturn(this.tracer);
 		BDDMockito.given(beanFactory.getBean(TraceKeys.class)).willReturn(this.traceKeys);
 		BDDMockito.given(beanFactory.getBean(HttpSpanExtractor.class)).willReturn(this.spanExtractor);
-		BDDMockito.given(beanFactory.getBean(SpanReporter.class)).willReturn(new NoOpSpanReporter());
+		BDDMockito.given(beanFactory.getBean(SpanReporter.class)).willReturn(this.spanReporter);
 		BDDMockito.given(beanFactory.getBean(HttpTraceKeysInjector.class)).willReturn(this.httpTraceKeysInjector);
 		BDDMockito.given(beanFactory.getBean(ErrorParser.class)).willReturn(new ExceptionMessageErrorParser());
 		return beanFactory;

@@ -18,6 +18,8 @@ package org.springframework.cloud.sleuth.zipkin;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import zipkin.reporter.Encoding;
+
 /**
  * Zipkin settings
  *
@@ -26,10 +28,26 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  */
 @ConfigurationProperties("spring.zipkin")
 public class ZipkinProperties {
-	/** URL of the zipkin query server instance. */
+	/** URL of the zipkin query server instance. You can also provide
+	 *  the service id of the Zipkin server if Zipkin's registered in
+	 *  service discovery (e.g. http://zipkinserver/)
+	 */
 	private String baseUrl = "http://localhost:9411/";
+	/**
+	 * Enables sending spans to Zipkin
+	 */
 	private boolean enabled = true;
+	/**
+	 * Interval in seconds in which spans will be sent in batches to Zipkin
+	 */
 	private int flushInterval = 1;
+	/**
+	 * Encoding type of spans sent to Zipkin
+	 */
+	private Encoding encoding = Encoding.JSON;
+	/**
+	 * Configuration related to compressions of spans sent to Zipkin
+	 */
 	private Compression compression = new Compression();
 
 	private Service service = new Service();
@@ -84,6 +102,14 @@ public class ZipkinProperties {
 		this.locator = locator;
 	}
 
+	public Encoding getEncoding() {
+		return this.encoding;
+	}
+
+	public void setEncoding(Encoding encoding) {
+		this.encoding = encoding;
+	}
+
 	/** When enabled, spans are gzipped before sent to the zipkin server */
 	public static class Compression {
 
@@ -113,6 +139,11 @@ public class ZipkinProperties {
 		}
 	}
 
+	/** Configuration related to locating of the host name from service discovery.
+	 *  This property is NOT related to finding Zipkin via Service Disovery.
+	 *  To do so use the {@link ZipkinProperties#baseUrl} property with the
+	 *  service name set inside the URL.
+	 */
 	public static class Locator {
 
 		private Discovery discovery;

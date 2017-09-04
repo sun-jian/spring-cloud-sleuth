@@ -31,8 +31,8 @@ import javax.servlet.http.HttpServletResponse;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.cloud.sleuth.ErrorParser;
-import org.springframework.cloud.sleuth.ExceptionMessageErrorParser;
 import org.springframework.cloud.sleuth.Span;
 import org.springframework.cloud.sleuth.SpanReporter;
 import org.springframework.cloud.sleuth.TraceKeys;
@@ -91,51 +91,43 @@ public class TraceFilter extends GenericFilterBean {
 	protected static final String TRACE_CLOSE_SPAN_REQUEST_ATTR = TraceFilter.class.getName()
 			+ ".CLOSE_SPAN";
 
-	/**
-	 * @deprecated please use {@link SleuthWebProperties#DEFAULT_SKIP_PATTERN}
-	 */
-	@Deprecated
-	public static final String DEFAULT_SKIP_PATTERN = SleuthWebProperties.DEFAULT_SKIP_PATTERN;
+	private static final String TRACE_SPAN_WITHOUT_PARENT = TraceFilter.class.getName()
+			+ ".SPAN_WITH_NO_PARENT";
 
 	private Tracer tracer;
 	private TraceKeys traceKeys;
-	private Pattern skipPattern;
+	private final Pattern skipPattern;
 	private SpanReporter spanReporter;
 	private HttpSpanExtractor spanExtractor;
 	private HttpTraceKeysInjector httpTraceKeysInjector;
 	private ErrorParser errorParser;
-	private BeanFactory beanFactory;
+	private final BeanFactory beanFactory;
 
-	private UrlPathHelper urlPathHelper = new UrlPathHelper();
-
-	@Deprecated
-	public TraceFilter(Tracer tracer, TraceKeys traceKeys, SpanReporter spanReporter,
-			HttpSpanExtractor spanExtractor,
-			HttpTraceKeysInjector httpTraceKeysInjector) {
-		this(tracer, traceKeys, Pattern.compile(SleuthWebProperties.DEFAULT_SKIP_PATTERN), spanReporter,
-				spanExtractor, httpTraceKeysInjector);
-	}
-
-	@Deprecated
-	public TraceFilter(Tracer tracer, TraceKeys traceKeys, Pattern skipPattern,
-			SpanReporter spanReporter, HttpSpanExtractor spanExtractor,
-			HttpTraceKeysInjector httpTraceKeysInjector) {
-		this.tracer = tracer;
-		this.traceKeys = traceKeys;
-		this.skipPattern = skipPattern;
-		this.spanReporter = spanReporter;
-		this.spanExtractor = spanExtractor;
-		this.httpTraceKeysInjector = httpTraceKeysInjector;
-		this.errorParser = new ExceptionMessageErrorParser();
-	}
+	private final UrlPathHelper urlPathHelper = new UrlPathHelper();
 
 	public TraceFilter(BeanFactory beanFactory) {
-		this(beanFactory, Pattern.compile(SleuthWebProperties.DEFAULT_SKIP_PATTERN));
+		this(beanFactory, skipPattern(beanFactory));
 	}
 
 	public TraceFilter(BeanFactory beanFactory, Pattern skipPattern) {
 		this.beanFactory = beanFactory;
 		this.skipPattern = skipPattern;
+	}
+
+	private static Pattern skipPattern(BeanFactory beanFactory) {
+		try {
+			TraceWebAutoConfiguration.SkipPatternProvider patternProvider = beanFactory
+					.getBean(TraceWebAutoConfiguration.SkipPatternProvider.class);
+			// the null value will not happen on production but might happen in tests
+			if (patternProvider != null) {
+				return patternProvider.skipPattern();
+			}
+		} catch (NoSuchBeanDefinitionException e) {
+			if (log.isDebugEnabled()) {
+				log.debug("The default SkipPatternProvider implementation is missing, will fallback to a default value of patterns");
+			}
+		}
+		return Pattern.compile(SleuthWebProperties.DEFAULT_SKIP_PATTERN);
 	}
 
 	@Override
@@ -244,6 +236,7 @@ public class TraceFilter extends GenericFilterBean {
 		Span span = spanFromRequest;
 		if (span != null) {
 			addResponseTags(response, exception);
+			addResponseTagsForSpanWithoutParent(request, response);
 			if (span.hasSavedSpan() && requestHasAlreadyBeenHandled(request)) {
 				recordParentSpan(span.getSavedSpan());
 			} else if (!requestHasAlreadyBeenHandled(request)) {
@@ -257,7 +250,8 @@ public class TraceFilter extends GenericFilterBean {
 					log.debug("Closing the span " + span + " since the response was successful");
 				}
 				tracer().close(span);
-			} else if (errorAlreadyHandled(request) && tracer().isTracing()) {
+				clearTraceAttribute(request);
+			} else if (errorAlreadyHandled(request) && tracer().isTracing() && !shouldCloseSpan(request)) {
 				if (log.isDebugEnabled()) {
 					log.debug(
 							"Won't detach the span " + span + " since error has already been handled");
@@ -268,13 +262,27 @@ public class TraceFilter extends GenericFilterBean {
 							"Will close span " + span + " since some component marked it for closure");
 				}
 				tracer().close(span);
+				clearTraceAttribute(request);
 			} else if (tracer().isTracing()) {
 				if (log.isDebugEnabled()) {
 					log.debug("Detaching the span " + span + " since the response was unsuccessful");
 				}
 				tracer().detach(span);
+				clearTraceAttribute(request);
 			}
 		}
+	}
+
+	private void addResponseTagsForSpanWithoutParent(HttpServletRequest request,
+			HttpServletResponse response) {
+		if (spanWithoutParent(request) && response.getStatus() >= 100) {
+			tracer().addTag(traceKeys().getHttp().getStatusCode(),
+					String.valueOf(response.getStatus()));
+		}
+	}
+
+	private boolean spanWithoutParent(HttpServletRequest request) {
+		return request.getAttribute(TRACE_SPAN_WITHOUT_PARENT) != null;
 	}
 
 	private boolean stillTracingCurrentSapn(Span span) {
@@ -309,6 +317,10 @@ public class TraceFilter extends GenericFilterBean {
 
 	private Span getSpanFromAttribute(HttpServletRequest request) {
 		return (Span) request.getAttribute(TRACE_REQUEST_ATTR);
+	}
+
+	private void clearTraceAttribute(HttpServletRequest request) {
+		request.setAttribute(TRACE_REQUEST_ATTR, null);
 	}
 
 	private boolean errorAlreadyHandled(HttpServletRequest request) {
@@ -372,6 +384,8 @@ public class TraceFilter extends GenericFilterBean {
 				} else {
 					spanFromRequest = tracer().createSpan(name);
 				}
+				addRequestTags(spanFromRequest, request);
+				request.setAttribute(TRACE_SPAN_WITHOUT_PARENT, spanFromRequest);
 			}
 			spanFromRequest.logEvent(Span.SERVER_RECV);
 			request.setAttribute(TRACE_REQUEST_ATTR, spanFromRequest);

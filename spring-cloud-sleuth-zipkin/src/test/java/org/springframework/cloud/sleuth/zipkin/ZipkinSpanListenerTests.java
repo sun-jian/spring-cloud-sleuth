@@ -16,11 +16,17 @@
 
 package org.springframework.cloud.sleuth.zipkin;
 
+import org.assertj.core.api.Condition;
+import org.junit.Ignore;
+import org.springframework.cloud.client.ServiceInstance;
+import org.springframework.cloud.client.discovery.DiscoveryClient;
 import zipkin.Constants;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import javax.annotation.PostConstruct;
 
 import org.junit.Test;
@@ -41,6 +47,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.test.context.junit4.SpringRunner;
+import zipkin.Endpoint;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
@@ -54,7 +61,6 @@ import static org.junit.Assert.assertEquals;
 public class ZipkinSpanListenerTests {
 
 	@Autowired Tracer tracer;
-	@Autowired ApplicationContext application;
 	@Autowired TestConfiguration test;
 	@Autowired ZipkinSpanListener spanListener;
 	@Autowired ZipkinSpanReporter spanReporter;
@@ -219,7 +225,14 @@ public class ZipkinSpanListenerTests {
 
 		assertThat(result.binaryAnnotations)
 				.filteredOn("key", Constants.SERVER_ADDR)
-				.isNotEmpty();
+				.extracting(input -> input.endpoint)
+				.hasSize(1)
+				.has(new Condition<List<? extends Endpoint>>() {
+					@Override public boolean matches(List<? extends Endpoint> value) {
+						Endpoint endpoint = value.get(0);
+						return endpoint.serviceName.equals("fooservice") && endpoint.ipv4 == 0;
+					}
+				});
 	}
 
 	@Test
@@ -284,7 +297,7 @@ public class ZipkinSpanListenerTests {
 	public void shouldNotAddAnyServiceIdTagWhenSpanContainsRpcEventAndThereIsNoEnvironment() {
 		this.parent.logEvent(Span.CLIENT_RECV);
 		ZipkinSpanListener spanListener = new ZipkinSpanListener(this.spanReporter,
-				this.endpointLocator, null);
+				this.endpointLocator, null, new ArrayList<>());
 
 		zipkin.Span result = spanListener.convert(this.parent);
 

@@ -30,7 +30,7 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
 import org.springframework.web.client.RestTemplate;
 
-import static com.jayway.awaitility.Awaitility.await;
+import static org.awaitility.Awaitility.await;
 import static java.util.Arrays.asList;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static java.util.stream.Collectors.toList;
@@ -59,7 +59,7 @@ public class MultipleHopsIntegrationTests {
 	public void should_prepare_spans_for_export() throws Exception {
 		this.restTemplate.getForObject("http://localhost:" + this.config.port + "/greeting", String.class);
 
-		await().atMost(5, SECONDS).until(() -> {
+		await().atMost(5, SECONDS).untilAsserted(() -> {
 			then(this.arrayListSpanAccumulator.getSpans().stream().map(Span::getName)
 					.collect(
 					toList())).containsAll(asList("http:/greeting", "message:greetings",
@@ -73,19 +73,23 @@ public class MultipleHopsIntegrationTests {
 		//tag::baggage[]
 		Span initialSpan = this.tracer.createSpan("span");
 		initialSpan.setBaggageItem("foo", "bar");
+		initialSpan.setBaggageItem("UPPER_CASE", "someValue");
 		//end::baggage[]
 
 		try {
 			HttpHeaders headers = new HttpHeaders();
 			headers.put("baggage-baz", Collections.singletonList("baz"));
+			headers.put("BAGGAGE-bizarreCASE", Collections.singletonList("value"));
 			RequestEntity requestEntity = new RequestEntity(headers, HttpMethod.GET,
 					URI.create("http://localhost:" + this.config.port + "/greeting"));
 			this.restTemplate.exchange(requestEntity, String.class);
 
-			await().atMost(5, SECONDS).until(() -> {
+			await().atMost(5, SECONDS).untilAsserted(() -> {
 				then(new ListOfSpans(this.arrayListSpanAccumulator.getSpans()))
 						.everySpanHasABaggage("foo", "bar")
-						.anySpanHasABaggage("baz", "baz");
+						.everySpanHasABaggage("upper_case", "someValue")
+						.anySpanHasABaggage("baz", "baz")
+						.anySpanHasABaggage("bizarrecase", "value");
 			});
 		} finally {
 			this.tracer.close(initialSpan);
