@@ -142,9 +142,7 @@ public class TraceFilter extends GenericFilterBean {
 		boolean skip = this.skipPattern.matcher(uri).matches()
 				|| Span.SPAN_NOT_SAMPLED.equals(ServletUtils.getHeader(request, response, Span.SAMPLED_NAME));
 		Span spanFromRequest = getSpanFromAttribute(request);
-		if (spanFromRequest != null) {
-			continueSpan(request, spanFromRequest);
-		}
+
 		if (log.isDebugEnabled()) {
 			log.debug("Received a request to uri [" + uri + "] that should not be sampled [" + skip + "]");
 		}
@@ -153,6 +151,10 @@ public class TraceFilter extends GenericFilterBean {
 			Span parentSpan = parentSpan(spanFromRequest);
 			processErrorRequest(filterChain, request, new TraceHttpServletResponse(response, parentSpan), spanFromRequest);
 			return;
+		}
+
+		if (spanFromRequest != null) {
+			continueSpan(request, spanFromRequest);
 		}
 		String name = HTTP_COMPONENT + ":" + uri;
 		Throwable exception = null;
